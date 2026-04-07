@@ -1,16 +1,15 @@
-#![allow(unused)] // REMOVE WHEN DONE
 use axum::{
     Json, Router,
     extract::{State, Path},
-    http::{HeaderMap, StatusCode},
-    routing::{delete, get, post},
+    http::{StatusCode},
+    routing::{get, post},
 };
 
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Utc};
 use nanoid::nanoid;
 
 use serde::{Deserialize, Serialize};
-use sqlx::{Sqlite, prelude::FromRow, sqlite::SqlitePool};
+use sqlx::{prelude::FromRow, sqlite::SqlitePool};
 use std::sync::Arc;
 
 struct AppState {
@@ -19,7 +18,6 @@ struct AppState {
 }
 
 struct AppConfig {
-    base_url: String,
     max_paste_size: usize,
 }
 
@@ -47,23 +45,34 @@ async fn health() -> Json<ApiResponse> {
 async fn create_paste(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreatePaste>,
-) -> Result<(StatusCode, Json<Paste>), StatusCode> {
+) -> Result<(StatusCode, Json<Paste>), (StatusCode, Json<ApiResponse>)> {
     
     if body.content.len() > state.config.max_paste_size {
-        return Err(StatusCode::PAYLOAD_TOO_LARGE);
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(ApiResponse { contents: "Too large!".into() })
+        ));
     }
 
     let id = nanoid!(10);
 
     let now = Utc::now();
 
-    let _ = sqlx::query(
+    sqlx::query(
         "INSERT INTO pastes (id, content, created_at) VALUES (?, ?, ?)")
         .bind(&id)
         .bind(&body.content)
         .bind(now)
         .execute(&state.db)
-        .await;
+        .await
+        .map_err(|e|{
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    contents: format!("database error!: {e}"),
+                }),
+            )
+        })?;
     
     let new_paste = Paste {
         id,
@@ -129,13 +138,12 @@ async fn main() {
         .expect("Failed to connect to a database");
 
     let config = AppConfig {
-        base_url: std::env::var("BASE_URL").expect("BASE_URL must be set in environment variables!"),
         max_paste_size: 1200
     };
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS pastes (
-            id STRING PRIMARY KEY,
+            id TEXT PRIMARY KEY,
             content TEXT NOT NULL,
             created_at DATETIME NOT NULL
         )"
@@ -152,7 +160,7 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(health))
         .route("/pastes/new", post(create_paste))
-        .route("/pastes/:id", get(get_paste))
+        .route("/pastes/{id}", get(get_paste))
         .route("/pastes", get(list_pastes))
         .with_state(state);
 
