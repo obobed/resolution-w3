@@ -1,5 +1,6 @@
 # Hastebin
 A light and simple pastebin clone, with pastes that anyone can see :D
+Try it out [here](https://paste.olived.xyz/pastes)!
 
 ## Documentation
 | method | endpoint | description |
