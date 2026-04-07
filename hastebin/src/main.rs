@@ -49,6 +49,10 @@ async fn create_paste(
     Json(body): Json<CreatePaste>,
 ) -> Result<(StatusCode, Json<Paste>), StatusCode> {
     
+    if body.content.len() > state.config.max_paste_size {
+        return Err(StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
     let id = nanoid!(10);
 
     let now = Utc::now();
@@ -88,9 +92,36 @@ async fn list_pastes(
         )
     })?;
     
-    Ok((Json(pastes)))
+    Ok(Json(pastes))
 }
 
+async fn get_paste(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>
+) -> Result<Json<Paste>, (StatusCode, Json<ApiResponse>)> {
+    let paste: Option<Paste> = sqlx::query_as(
+        "SELECT id, content, created_at FROM pastes WHERE id = ? LIMIT 1",
+    )
+    .bind(&id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e|{
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse {
+                contents: format!("database error!: {e}"),
+            }),
+        )
+    })?;
+    match paste {
+        Some(p) => Ok(Json(p)),
+        None => Err((
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse { contents: "Paste not found".into() }) 
+        ))
+    }
+    
+}
 #[tokio::main]
 async fn main() {
     let db = SqlitePool::connect("sqlite:hastebin.db?mode=rwc")
@@ -103,10 +134,11 @@ async fn main() {
     };
 
     sqlx::query(
-        "CREATE TABLE IF NOT EXISTS pastes
-        id STRING PRIMARY KEY
-        content TEXT NOT NULL
-        created_at DATETIME NOT NULL",
+        "CREATE TABLE IF NOT EXISTS pastes (
+            id STRING PRIMARY KEY,
+            content TEXT NOT NULL,
+            created_at DATETIME NOT NULL
+        )"
     )
     .execute(&db)
     .await
@@ -120,7 +152,14 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(health))
         .route("/pastes/new", post(create_paste))
+        .route("/pastes/:id", get(get_paste))
         .route("/pastes", get(list_pastes))
         .with_state(state);
 
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:5417")
+        .await
+        .expect("Failed to bind");
+
+    println!("listening on http://0.0.0.0:5417");
+    axum::serve(listener, app).await.expect("server error");
 }
