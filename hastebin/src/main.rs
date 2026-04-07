@@ -137,6 +137,16 @@ async fn get_paste(
         )),
     }
 }
+
+async fn handler_404() -> (StatusCode, Json<ApiResponse>) {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ApiResponse {
+            contents: "Route not found, check your URL!".to_string()
+        }),
+    )
+}
+
 #[tokio::main]
 async fn main() {
     let db = SqlitePool::connect("sqlite:hastebin.db?mode=rwc")
@@ -192,6 +202,7 @@ async fn main() {
             "/pastes",
             get(list_pastes).layer(GovernorLayer::new(read_conf)),
         )
+        .fallback(handler_404)
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:5417")
