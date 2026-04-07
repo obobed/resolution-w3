@@ -144,7 +144,7 @@ async fn main() {
         .expect("Failed to connect to a database");
 
     let config = AppConfig {
-        max_paste_size: 1200,
+        max_paste_size: 3200,
     };
 
     let create_conf = Arc::new(
