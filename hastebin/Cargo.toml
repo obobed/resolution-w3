@@ -10,4 +10,6 @@ nanoid = "0.4.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sqlx = { version = "0.8.6", features = ["chrono", "runtime-tokio", "sqlite"] }
-tokio = { version = "1.51.0", features = ["full"] }
+tokio = { version = "1.51.0", features = ["macros", "rt-multi-thread", "net"] }
+tower = "0.5.3"
+tower_governor = "0.8.0"

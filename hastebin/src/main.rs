@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
-    extract::{State, Path},
-    http::{StatusCode},
+    extract::{Path, State},
+    http::StatusCode,
     routing::{get, post},
 };
 
@@ -12,8 +12,13 @@ use serde::{Deserialize, Serialize};
 use sqlx::{prelude::FromRow, sqlite::SqlitePool};
 use std::sync::Arc;
 
+use std::net::SocketAddr;
+use tower_governor::{
+    GovernorLayer, governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor,
+};
+
 struct AppState {
-    db: SqlitePool, 
+    db: SqlitePool,
     config: AppConfig,
 }
 
@@ -30,7 +35,7 @@ struct Paste {
 
 #[derive(Deserialize)]
 struct CreatePaste {
-    content: String
+    content: String,
 }
 
 #[derive(Serialize)]
@@ -39,18 +44,21 @@ struct ApiResponse {
 }
 
 async fn health() -> Json<ApiResponse> {
-    Json(ApiResponse { contents: "ok".to_string(), })
+    Json(ApiResponse {
+        contents: "ok".to_string(),
+    })
 }
 
 async fn create_paste(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreatePaste>,
 ) -> Result<(StatusCode, Json<Paste>), (StatusCode, Json<ApiResponse>)> {
-    
     if body.content.len() > state.config.max_paste_size {
         return Err((
             StatusCode::PAYLOAD_TOO_LARGE,
-            Json(ApiResponse { contents: "Too large!".into() })
+            Json(ApiResponse {
+                contents: "Too large!".into(),
+            }),
         ));
     }
 
@@ -58,14 +66,13 @@ async fn create_paste(
 
     let now = Utc::now();
 
-    sqlx::query(
-        "INSERT INTO pastes (id, content, created_at) VALUES (?, ?, ?)")
+    sqlx::query("INSERT INTO pastes (id, content, created_at) VALUES (?, ?, ?)")
         .bind(&id)
         .bind(&body.content)
         .bind(now)
         .execute(&state.db)
         .await
-        .map_err(|e|{
+        .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse {
@@ -73,26 +80,25 @@ async fn create_paste(
                 }),
             )
         })?;
-    
+
     let new_paste = Paste {
         id,
         content: body.content,
         created_at: now,
     };
 
-
     Ok((StatusCode::CREATED, Json(new_paste)))
 }
 
 async fn list_pastes(
-    State(state): State<Arc<AppState>>
+    State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<Paste>>, (StatusCode, Json<ApiResponse>)> {
     let pastes: Vec<Paste> = sqlx::query_as(
         "SELECT id, content, created_at FROM pastes ORDER BY created_at DESC LIMIT 50",
     )
     .fetch_all(&state.db)
     .await
-    .map_err(|e|{
+    .map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
@@ -100,36 +106,36 @@ async fn list_pastes(
             }),
         )
     })?;
-    
+
     Ok(Json(pastes))
 }
 
 async fn get_paste(
     Path(id): Path<String>,
-    State(state): State<Arc<AppState>>
+    State(state): State<Arc<AppState>>,
 ) -> Result<Json<Paste>, (StatusCode, Json<ApiResponse>)> {
-    let paste: Option<Paste> = sqlx::query_as(
-        "SELECT id, content, created_at FROM pastes WHERE id = ? LIMIT 1",
-    )
-    .bind(&id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e|{
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse {
-                contents: format!("database error!: {e}"),
-            }),
-        )
-    })?;
+    let paste: Option<Paste> =
+        sqlx::query_as("SELECT id, content, created_at FROM pastes WHERE id = ? LIMIT 1")
+            .bind(&id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse {
+                        contents: format!("database error!: {e}"),
+                    }),
+                )
+            })?;
     match paste {
         Some(p) => Ok(Json(p)),
         None => Err((
             StatusCode::NOT_FOUND,
-            Json(ApiResponse { contents: "Paste not found".into() }) 
-        ))
+            Json(ApiResponse {
+                contents: "Paste not found".into(),
+            }),
+        )),
     }
-    
 }
 #[tokio::main]
 async fn main() {
@@ -138,30 +144,54 @@ async fn main() {
         .expect("Failed to connect to a database");
 
     let config = AppConfig {
-        max_paste_size: 1200
+        max_paste_size: 1200,
     };
+
+    let create_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(2)
+            .burst_size(5)
+            .key_extractor(SmartIpKeyExtractor)
+            .finish()
+            .unwrap(),
+    );
+
+    let read_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(1)
+            .burst_size(10)
+            .key_extractor(SmartIpKeyExtractor)
+            .finish()
+            .unwrap(),
+    );
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS pastes (
             id TEXT PRIMARY KEY,
             content TEXT NOT NULL,
             created_at DATETIME NOT NULL
-        )"
+        )",
     )
     .execute(&db)
     .await
     .expect("failed to create table");
 
-    let state = Arc::new(AppState {
-        db,
-        config,
-    });
+    let state = Arc::new(AppState { db, config });
 
     let app = Router::new()
         .route("/health", get(health))
-        .route("/pastes/new", post(create_paste))
-        .route("/pastes/{id}", get(get_paste))
-        .route("/pastes", get(list_pastes))
+        .route(
+            "/pastes/new",
+            post(create_paste).layer(GovernorLayer::new(create_conf)),
+        )
+        .route(
+            "/pastes/{id}",
+            get(get_paste).layer(GovernorLayer::new(read_conf.clone())),
+        )
+        .route(
+            "/pastes",
+            get(list_pastes).layer(GovernorLayer::new(read_conf)),
+        )
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:5417")
@@ -169,5 +199,10 @@ async fn main() {
         .expect("Failed to bind");
 
     println!("listening on http://0.0.0.0:5417");
-    axum::serve(listener, app).await.expect("server error");
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .unwrap();
 }
