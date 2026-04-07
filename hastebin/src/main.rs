@@ -71,8 +71,7 @@ async fn create_paste(
     Ok((StatusCode::CREATED, Json(new_paste)))
 }
 
-async fn get_paste(
-    Path(id): Path<String>,
+async fn list_pastes(
     State(state): State<Arc<AppState>>
 ) -> Result<Json<Vec<Paste>>, (StatusCode, Json<ApiResponse>)> {
     let pastes: Vec<Paste> = sqlx::query_as(
@@ -89,7 +88,7 @@ async fn get_paste(
         )
     })?;
     
-    Ok(Json(pastes))
+    Ok((Json(pastes)))
 }
 
 #[tokio::main]
@@ -120,7 +119,8 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(health))
-        .route("/new", post(create_paste))
+        .route("/pastes/new", post(create_paste))
+        .route("/pastes", get(list_pastes))
         .with_state(state);
 
 }
