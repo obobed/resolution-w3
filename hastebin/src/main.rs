@@ -1,8 +1,5 @@
 use axum::{
-    Json, Router,
-    extract::{Path, State},
-    http::StatusCode,
-    routing::{get, post},
+    Json, Router, extract::{Path, State}, http::StatusCode, response::Redirect, routing::{get, post}
 };
 
 use chrono::{DateTime, Utc};
@@ -147,6 +144,10 @@ async fn handler_404() -> (StatusCode, Json<ApiResponse>) {
     )
 }
 
+async fn root_redirect() -> Redirect {
+    Redirect::permanent("https://github.com/obobed/resolution-w3")
+}
+
 #[tokio::main]
 async fn main() {
     let db = SqlitePool::connect("sqlite:hastebin.db?mode=rwc")
@@ -201,6 +202,10 @@ async fn main() {
         .route(
             "/pastes",
             get(list_pastes).layer(GovernorLayer::new(read_conf)),
+        )
+        .route(
+            "/",
+            get(root_redirect)
         )
         .fallback(handler_404)
         .with_state(state);
