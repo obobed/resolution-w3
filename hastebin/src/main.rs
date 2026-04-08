@@ -43,18 +43,25 @@ struct ApiResponse {
     contents: String,
 }
 
+#[derive(OpenApi)]
+#[openapi(
+    paths(create_paste, get_paste, list_pastes, health),
+    components(schemas(Paste, CreatePaste, ApiResponse))
+)]
+struct ApiDoc;
+
+#[utoipa::path(
+    get,
+    path = "/health",
+    responses(
+        (status = 200, description = "Ok")
+    )
+)]
 async fn health() -> Json<ApiResponse> {
     Json(ApiResponse {
         contents: "ok".to_string(),
     })
 }
-
-#[derive(OpenApi)]
-#[openapi(
-    paths(create_paste, get_paste, list_pastes),
-    components(schemas(Paste, CreatePaste, ApiResponse))
-)]
-struct ApiDoc;
 
 #[utoipa::path(
     post,
