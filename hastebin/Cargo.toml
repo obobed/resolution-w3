@@ -13,3 +13,5 @@ sqlx = { version = "0.8.6", features = ["chrono", "runtime-tokio", "sqlite"] }
 tokio = { version = "1.51.0", features = ["macros", "rt-multi-thread", "net"] }
 tower = "0.5.3"
 tower_governor = "0.8.0"
+utoipa = { version = "5.4.0", features = ["chrono"] }
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }

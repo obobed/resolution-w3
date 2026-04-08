@@ -14,6 +14,9 @@ use tower_governor::{
     GovernorLayer, governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor,
 };
 
+use utoipa::{OpenApi, ToSchema};
+use utoipa_swagger_ui::SwaggerUi;
+
 struct AppState {
     db: SqlitePool,
     config: AppConfig,
@@ -23,19 +26,19 @@ struct AppConfig {
     max_paste_size: usize,
 }
 
-#[derive(Serialize, FromRow)]
+#[derive(Serialize, FromRow, ToSchema)]
 struct Paste {
     id: String,
     content: String,
     created_at: DateTime<Utc>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 struct CreatePaste {
     content: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 struct ApiResponse {
     contents: String,
 }
@@ -46,6 +49,22 @@ async fn health() -> Json<ApiResponse> {
     })
 }
 
+#[derive(OpenApi)]
+#[openapi(
+    paths(create_paste, get_paste, list_pastes),
+    components(schemas(Paste, CreatePaste, ApiResponse))
+)]
+struct ApiDoc;
+
+#[utoipa::path(
+    post,
+    path = "/pastes/new",
+    request_body = CreatePaste,
+    responses(
+        (status = 201, description = "Paste created successfully", body = Paste),
+        (status = 429, description = "Too many requests")
+    )
+)]
 async fn create_paste(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreatePaste>,
@@ -87,6 +106,14 @@ async fn create_paste(
     Ok((StatusCode::CREATED, Json(new_paste)))
 }
 
+#[utoipa::path(
+    get,
+    path = "/pastes",
+    responses(
+        (status = 200, description = "List of the 50 most recent pastes", body = [Paste]),
+        (status = 500, description = "Internal database error", body = ApiResponse)
+    )
+)]
 async fn list_pastes(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<Paste>>, (StatusCode, Json<ApiResponse>)> {
@@ -107,6 +134,18 @@ async fn list_pastes(
     Ok(Json(pastes))
 }
 
+#[utoipa::path(
+    get,
+    path = "/pastes/{id}",
+    responses(
+        (status = 200, description = "Paste found", body = Paste),
+        (status = 404, description = "Paste not found", body = ApiResponse),
+        (status = 500, description = "Internal server error", body = ApiResponse)
+    ),
+    params(
+        ("id" = String, Path, description = "The unique ID of the paste")
+    )
+)]
 async fn get_paste(
     Path(id): Path<String>,
     State(state): State<Arc<AppState>>,
@@ -144,8 +183,12 @@ async fn handler_404() -> (StatusCode, Json<ApiResponse>) {
     )
 }
 
-async fn root_redirect() -> Redirect {
+async fn gh_redirect() -> Redirect {
     Redirect::permanent("https://github.com/obobed/resolution-w3")
+}
+
+async fn root_redirect() -> Redirect {
+    Redirect::permanent("/docs")
 }
 
 #[tokio::main]
@@ -190,6 +233,7 @@ async fn main() {
     let state = Arc::new(AppState { db, config });
 
     let app = Router::new()
+        .merge(SwaggerUi::new("/docs/").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/health", get(health))
         .route(
             "/pastes/new",
@@ -202,6 +246,10 @@ async fn main() {
         .route(
             "/pastes",
             get(list_pastes).layer(GovernorLayer::new(read_conf)),
+        )
+        .route(
+            "/gh",
+            get(gh_redirect)
         )
         .route(
             "/",
