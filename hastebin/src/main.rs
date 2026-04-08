@@ -15,8 +15,7 @@ use tower_governor::{
 };
 
 use utoipa::{OpenApi, ToSchema};
-use utoipa_swagger_ui::SwaggerUi;
-
+use utoipa_scalar::{Scalar, Servable};
 struct AppState {
     db: SqlitePool,
     config: AppConfig,
@@ -240,7 +239,7 @@ async fn main() {
     let state = Arc::new(AppState { db, config });
 
     let app = Router::new()
-        .merge(SwaggerUi::new("/docs/").url("/api-docs/openapi.json", ApiDoc::openapi()))
+        .merge(Scalar::with_url("/docs", ApiDoc::openapi()))
         .route("/health", get(health))
         .route(
             "/pastes/new",

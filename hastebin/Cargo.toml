@@ -14,4 +14,4 @@ tokio = { version = "1.51.0", features = ["macros", "rt-multi-thread", "net"] }
 tower = "0.5.3"
 tower_governor = "0.8.0"
 utoipa = { version = "5.4.0", features = ["chrono"] }
-utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
+utoipa-scalar = { version = "0.3.0", features = ["axum"] }
